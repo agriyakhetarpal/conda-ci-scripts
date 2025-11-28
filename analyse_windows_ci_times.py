@@ -163,7 +163,7 @@ print(
     f"\nFound {len(results)} Windows job results in total between start {three_months_ago} and {three_months_ago + timedelta(days=90)}\n"
 )
 
-output_file = "windows_ci_times.csv"
+output_file = Path("data") / "windows_ci_times.csv"
 with open(output_file, "w", newline="") as f:
     writer = csv.DictWriter(
         f,
@@ -174,7 +174,7 @@ with open(output_file, "w", newline="") as f:
             "duration_seconds",
             "duration_minutes",
         ],
-        lineterminator="\n",
+        lineterminator="\n", # lf
     )
     writer.writeheader()
     writer.writerows(results)
