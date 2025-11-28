@@ -2,15 +2,19 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "requests",
+#     "aiohttp",
 # ]
 # ///
 
+import asyncio
 import csv
 import os
+from pathlib import Path
 import subprocess
 import sys
 from datetime import datetime, timedelta
 
+import aiohttp
 import requests
 
 REPO = "conda/conda"
@@ -106,16 +110,19 @@ while should_continue:
 
 print(f"\nFound {len(runs)} successful runs in the last 3 months")
 
-print("Fetching job details for Windows tests...")
-results = []
-for i, run in enumerate(runs):
-    print(f"  Processing run {i + 1}/{len(runs)}...", end="\r")
+
+async def fetch_jobs_for_run(session, run, index, total):
+    print(f"    Processing run {index + 1}/{total}...", end="\r")
 
     jobs_url = run["jobs_url"]
-    response = requests.get(jobs_url, headers=headers)
-    response.raise_for_status()
-    jobs_data = response.json()
+    async with session.get(jobs_url) as response:
+        response.raise_for_status()
+        jobs_data = await response.json()
 
+    run_results = []
+
+    # get successful results only, because we don't know how long failed
+    # jobs ran before failing
     for job in jobs_data["jobs"]:
         if "windows" in job["name"].lower() and job["conclusion"] == "success":
             duration_seconds = (
@@ -123,7 +130,7 @@ for i, run in enumerate(runs):
                 - datetime.strptime(job["started_at"], "%Y-%m-%dT%H:%M:%SZ")
             ).total_seconds()
 
-            results.append(
+            run_results.append(
                 {
                     "run_id": run["id"],
                     "run_date": run["created_at"],
@@ -132,6 +139,25 @@ for i, run in enumerate(runs):
                     "duration_minutes": duration_seconds / 60,
                 }
             )
+
+    return run_results
+
+
+async def fetch_all_jobs(runs):
+    async with aiohttp.ClientSession(headers=headers) as session:
+        tasks = [
+            fetch_jobs_for_run(session, run, i, len(runs)) for i, run in enumerate(runs)
+        ]
+        results_nested = await asyncio.gather(*tasks)
+
+    results = []
+    for run_results in results_nested:
+        results.extend(run_results)
+
+    return results
+
+
+results = asyncio.run(fetch_all_jobs(runs))
 
 print(
     f"\nFound {len(results)} Windows job results in total between start {three_months_ago} and {three_months_ago + timedelta(days=90)}\n"
@@ -148,6 +174,7 @@ with open(output_file, "w", newline="") as f:
             "duration_seconds",
             "duration_minutes",
         ],
+        lineterminator="\n",
     )
     writer.writeheader()
     writer.writerows(results)
