@@ -115,15 +115,30 @@ async def fetch_jobs_for_run(session, run, index, total):
     print(f"    Processing run {index + 1}/{total}...", end="\r")
 
     jobs_url = run["jobs_url"]
-    async with session.get(jobs_url) as response:
-        response.raise_for_status()
-        jobs_data = await response.json()
+    all_jobs = []
+    page = 1
+
+    while True:
+        params = {"per_page": 100, "page": page}
+        async with session.get(jobs_url, params=params) as response:
+            response.raise_for_status()
+            jobs_data = await response.json()
+
+        if not jobs_data["jobs"]:
+            break
+
+        all_jobs.extend(jobs_data["jobs"])
+
+        if len(jobs_data["jobs"]) < 100:
+            break
+
+        page += 1
 
     run_results = []
 
     # get successful results only, because we don't know how long failed
     # jobs ran before failing
-    for job in jobs_data["jobs"]:
+    for job in all_jobs:
         if "windows" in job["name"].lower() and job["conclusion"] == "success":
             duration_seconds = (
                 datetime.strptime(job["completed_at"], "%Y-%m-%dT%H:%M:%SZ")
@@ -174,7 +189,7 @@ with open(output_file, "w", newline="") as f:
             "duration_seconds",
             "duration_minutes",
         ],
-        lineterminator="\n", # lf
+        lineterminator="\n",  # lf
     )
     writer.writeheader()
     writer.writerows(results)
